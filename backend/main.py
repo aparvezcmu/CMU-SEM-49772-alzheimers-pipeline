@@ -1,12 +1,31 @@
+# Load environment variables from .env file FIRST, before any imports
+import os
+import shutil
+from datetime import datetime
+import pickle
+from rag_indexer import extract_text_from_pdf, chunk_text, embed_texts, build_faiss_index, retrieve
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # If python-dotenv is not installed, manually load .env file
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_path):
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ[key.strip()] = value.strip()
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import json
 import asyncio
 from typing import List, Optional
-import os
-import shutil
-from datetime import datetime
+
 from models.openai_chat import get_openai_streaming_response, format_messages
 from kernel_manager import get_kernel_manager
 from storage.azure_blob_manager import get_blob_manager
@@ -72,6 +91,40 @@ class SelectNotebookRequest(BaseModel):
 @app.get("/")
 async def root():
     return {"message": "Alzheimer's Analysis Pipeline API"}
+
+@app.get("/api/checkpdf")
+async def check_pdf(query: str = ""):
+    # Sample API call: http://localhost:8000/api/checkpdf?query=What is the main objective of the paper?
+    #pdf_path = "/Users/tanya/f1.pdf"  # replace with a test paper
+    #texts = extract_text_from_pdf(pdf_path)
+    #print(texts)
+    #chunks = chunk_text(texts)
+    # write chunks to a file pickle format
+    #with open("/Users/tanya/chunks.pkl", "wb") as f:
+    #    pickle.dump(chunks, f)
+    #embs = embed_texts(chunks)
+    # write embs to a file pickle format
+    #with open("/Users/tanya/embs.pkl", "wb") as f:
+    #    pickle.dump(embs, f)
+
+    with open("/Users/tanya/embs.pkl", "rb") as f:
+        embs = pickle.load(f)
+    with open("/Users/tanya/chunks.pkl", "rb") as f:
+        chunks = pickle.load(f)
+    #index = build_faiss_index(embs)
+    # write index to a file pickle format
+    #with open("/Users/tanya/index.pkl", "wb") as f:
+    #    pickle.dump(index, f)
+
+    with open("/Users/tanya/index.pkl", "rb") as f:
+        index = pickle.load(f)
+    results = retrieve(index, embs, chunks, query, k=10)
+
+    response = ""
+    for r in results:
+        response += f"[Page {r['meta']['page']}] (score={r['score']:.2f}) {r['text'][:200]}...;\n"
+    print(response)
+    return {"status": "success", "response": response}
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):

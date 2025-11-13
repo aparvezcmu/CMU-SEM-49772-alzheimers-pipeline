@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CellOutput, PipelineStep } from '../types';
 import { RotateCcw, AlertCircle } from 'lucide-react';
+import { InlineAIEditor } from './InlineAIEditor';
 
 // Define code templates corresponding to each pipeline step
 const stepCodeTemplates: Record<string, string> = {
@@ -226,6 +227,12 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
   // Kernel restart states
   const [isRestartingKernel, setIsRestartingKernel] = useState(false);
   const [showRestartConfirmation, setShowRestartConfirmation] = useState(false);
+
+  // Inline AI Editor states
+  const [showInlineAIEditor, setShowInlineAIEditor] = useState(false);
+  const [selectedText, setSelectedText] = useState('');
+  const [editorPosition, setEditorPosition] = useState({ x: 0, y: 0 });
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Get current step's cell state
   const getCurrentCellState = () => {
@@ -473,6 +480,55 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
     }
   };
 
+  // Inline AI Editor handlers
+  const handleSelectionChange = () => {
+    if (!textareaRef.current) return;
+    const textarea = textareaRef.current;
+    const selection = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd);
+    setSelectedText(selection);
+  };
+
+  const handleKeyDownWithSelection = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Handle Ctrl+Enter for code execution
+    if (e.ctrlKey && e.key === 'Enter') {
+      e.preventDefault();
+      runCurrentStep();
+      return;
+    }
+
+    // Handle Cmd/Ctrl+K for inline AI
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      const textarea = textareaRef.current;
+      if (textarea) {
+        const selection = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd);
+        if (selection.trim()) {
+          setSelectedText(selection);
+          // Calculate position for the editor popup
+          const rect = textarea.getBoundingClientRect();
+          setEditorPosition({
+            x: rect.left + 20,
+            y: rect.top + textarea.scrollTop + 20
+          });
+          setShowInlineAIEditor(true);
+        }
+      }
+      return;
+    }
+
+    // Handle Escape to close editor
+    if (e.key === 'Escape' && showInlineAIEditor) {
+      setShowInlineAIEditor(false);
+    }
+  };
+
+  const handleSendInlineQuery = (query: string, context: string) => {
+    if (onSendErrorToChat) {
+      const fullPrompt = `${query}\n\nContext:\n${context}`;
+      onSendErrorToChat(fullPrompt);
+    }
+  };
+
   const renderOutput = (output: CellOutput) => {
     switch (output.type) {
       case 'stream':
@@ -682,17 +738,15 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ currentStep, onStepC
                   </span>
                 </div>
               )}
+              
               <textarea
+                ref={textareaRef}
                 value={code}
                 onChange={(e) => handleCodeChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.ctrlKey && e.key === 'Enter') {
-                    e.preventDefault();
-                    runCurrentStep();
-                  }
-                }}
+                onSelect={handleSelectionChange}
+                onKeyDown={handleKeyDownWithSelection}
                 className="w-full h-[500px] bg-gray-50 p-4 rounded-md font-mono text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed"
-                placeholder="Write any Python code here... (Ctrl+Enter to run)
+                placeholder="Write any Python code here... (Ctrl+Enter to run, Cmd/Ctrl+K to ask AI about selected code)
 
 Examples:
 - import matplotlib.pyplot as plt
@@ -732,6 +786,15 @@ Examples:
           </div>
         </div>
       </div>
+
+      {/* Inline AI Editor */}
+      <InlineAIEditor
+        isVisible={showInlineAIEditor}
+        onClose={() => setShowInlineAIEditor(false)}
+        selectedText={selectedText}
+        position={editorPosition}
+        onSendQuery={handleSendInlineQuery}
+      />
     </div>
   );
 };
