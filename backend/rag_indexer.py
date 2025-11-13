@@ -1,5 +1,5 @@
 # rag_indexer.py
-import fitz  # PyMuPDF
+#import fitz  # PyMuPDF
 from PyPDF2 import PdfReader
 import faiss
 import numpy as np

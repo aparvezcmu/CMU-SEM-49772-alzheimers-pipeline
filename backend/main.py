@@ -3,6 +3,9 @@ import os
 import shutil
 from datetime import datetime
 import pickle
+import tempfile
+import uuid
+import shutil
 from rag_indexer import extract_text_from_pdf, chunk_text, embed_texts, build_faiss_index, retrieve
 
 try:
@@ -19,13 +22,14 @@ except ImportError:
                     key, value = line.split('=', 1)
                     os.environ[key.strip()] = value.strip()
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import json
 import asyncio
-from typing import List, Optional
 
+from typing import List, Optional, Dict, Any
 from models.openai_chat import get_openai_streaming_response, format_messages
 from kernel_manager import get_kernel_manager
 from storage.azure_blob_manager import get_blob_manager
@@ -72,6 +76,61 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Session-based storage for PDFs and FAISS indexes
+# Structure: {session_id: {pdf_path, pdf_name, chunks, embeddings, faiss_index}}
+session_storage: Dict[str, Dict[str, Any]] = {}
+
+# Temporary directory for PDF uploads (cleared on restart)
+TEMP_DIR = tempfile.mkdtemp(prefix="alzheimer_pdfs_")
+
+def cleanup_session(session_id: str):
+    """Clean up session data including PDF file and FAISS index"""
+    if session_id in session_storage:
+        session_data = session_storage[session_id]
+        # Remove PDF file if it exists
+        if 'pdf_path' in session_data and os.path.exists(session_data['pdf_path']):
+            try:
+                os.remove(session_data['pdf_path'])
+            except Exception as e:
+                print(f"Error removing PDF file: {e}")
+        # Remove from session storage
+        del session_storage[session_id]
+        print(f"Cleaned up session: {session_id}")
+
+def is_document_query(query: str) -> bool:
+    """
+    Detect if a query is document-related using keyword/heuristic approach.
+    Returns True if the query seems to be asking about document content.
+    """
+    query_lower = query.lower()
+    
+    # Document-related keywords
+    doc_keywords = [
+        'paper', 'document', 'pdf', 'article', 'study', 'research',
+        'author', 'abstract', 'conclusion', 'method', 'result', 'finding',
+        'section', 'chapter', 'page', 'figure', 'table', 'reference',
+        'cite', 'source', 'publication'
+    ]
+    
+    # Interrogative patterns
+    interrogatives = [
+        'what', 'why', 'how', 'when', 'where', 'who', 'which',
+        'explain', 'describe', 'summarize', 'summary', 'tell me about',
+        'according to', 'does the', 'is the', 'are the', 'can you explain'
+    ]
+    
+    # Check for document keywords
+    has_doc_keyword = any(keyword in query_lower for keyword in doc_keywords)
+    
+    # Check for interrogative patterns
+    has_interrogative = any(pattern in query_lower for pattern in interrogatives)
+    
+    # Check for question marks
+    has_question_mark = '?' in query
+    
+    # Return True if it has interrogative patterns OR (question mark AND doc keywords)
+    return has_interrogative or (has_question_mark and has_doc_keyword)
+
 # Request/Response models for API endpoints
 class ChatMessage(BaseModel):
     role: str
@@ -92,44 +151,93 @@ class SelectNotebookRequest(BaseModel):
 async def root():
     return {"message": "Alzheimer's Analysis Pipeline API"}
 
-@app.get("/api/checkpdf")
-async def check_pdf(query: str = ""):
-    # Sample API call: http://localhost:8000/api/checkpdf?query=What is the main objective of the paper?
-    #pdf_path = "/Users/tanya/f1.pdf"  # replace with a test paper
-    #texts = extract_text_from_pdf(pdf_path)
-    #print(texts)
-    #chunks = chunk_text(texts)
-    # write chunks to a file pickle format
-    #with open("/Users/tanya/chunks.pkl", "wb") as f:
-    #    pickle.dump(chunks, f)
-    #embs = embed_texts(chunks)
-    # write embs to a file pickle format
-    #with open("/Users/tanya/embs.pkl", "wb") as f:
-    #    pickle.dump(embs, f)
-
-    with open("/Users/tanya/embs.pkl", "rb") as f:
-        embs = pickle.load(f)
-    with open("/Users/tanya/chunks.pkl", "rb") as f:
-        chunks = pickle.load(f)
-    #index = build_faiss_index(embs)
-    # write index to a file pickle format
-    #with open("/Users/tanya/index.pkl", "wb") as f:
-    #    pickle.dump(index, f)
-
-    with open("/Users/tanya/index.pkl", "rb") as f:
-        index = pickle.load(f)
-    results = retrieve(index, embs, chunks, query, k=10)
-
-    response = ""
-    for r in results:
-        response += f"[Page {r['meta']['page']}] (score={r['score']:.2f}) {r['text'][:200]}...;\n"
-    print(response)
-    return {"status": "success", "response": response}
+@app.post("/api/upload_pdf")
+async def upload_pdf(
+    file: UploadFile = File(...),
+    session_id: str = Form(...)
+):
+    """
+    Upload a PDF file and create FAISS index for RAG.
+    Replaces any existing PDF for this session.
+    """
+    try:
+        # Validate file type
+        if not file.filename.endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+        
+        # Clean up any existing session data
+        if session_id in session_storage:
+            cleanup_session(session_id)
+        
+        # Generate unique filename
+        unique_filename = f"{uuid.uuid4()}_{file.filename}"
+        pdf_path = os.path.join(TEMP_DIR, unique_filename)
+        
+        # Save uploaded file
+        with open(pdf_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
+        print(f"PDF saved to: {pdf_path}")
+        
+        # Process PDF with RAG indexer
+        try:
+            # Extract text from PDF
+            texts = extract_text_from_pdf(pdf_path)
+            if not texts:
+                raise ValueError("Could not extract text from PDF")
+            
+            # Chunk text
+            chunks = chunk_text(texts)
+            if not chunks:
+                raise ValueError("Could not create chunks from PDF text")
+            
+            # Generate embeddings
+            embeddings = embed_texts(chunks)
+            
+            # Build FAISS index
+            faiss_index = build_faiss_index(embeddings)
+            
+            # Store in session
+            session_storage[session_id] = {
+                'pdf_path': pdf_path,
+                'pdf_name': file.filename,
+                'chunks': chunks,
+                'embeddings': embeddings,
+                'faiss_index': faiss_index,
+                'num_pages': len(texts),
+                'num_chunks': len(chunks)
+            }
+            
+            print(f"Successfully indexed PDF for session {session_id}: {file.filename}")
+            
+            return {
+                "status": "success",
+                "message": "PDF uploaded and indexed successfully",
+                "pdf_name": file.filename,
+                "num_pages": len(texts),
+                "num_chunks": len(chunks)
+            }
+            
+        except Exception as e:
+            # Clean up file if processing failed
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
+            raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error uploading PDF: {str(e)}")
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
-    """WebSocket endpoint for streaming chat"""
+    """WebSocket endpoint for streaming chat with RAG support"""
     await websocket.accept()
+    
+    # Extract session_id from query params
+    session_id = websocket.query_params.get("session_id", None)
+    print(f"WebSocket connected with session_id: {session_id}")
     
     try:
         while True:
@@ -146,8 +254,57 @@ async def websocket_chat(websocket: WebSocket):
                     await websocket.send_text("<<<ERROR>>>")
                     continue
                 
-                # Format messages for OpenAI
-                messages = format_messages(user_message, chat_history)
+                # Check if session has indexed PDF and if query is document-related
+                use_rag = False
+                rag_context = ""
+                
+                if session_id and session_id in session_storage:
+                    session_data = session_storage[session_id]
+                    if is_document_query(user_message):
+                        use_rag = True
+                        print(f"Document query detected, using RAG for: {user_message}")
+                        
+                        # Retrieve relevant chunks from FAISS
+                        try:
+                            results = retrieve(
+                                session_data['faiss_index'],
+                                session_data['embeddings'],
+                                session_data['chunks'],
+                                user_message,
+                                k=5
+                            )
+                            
+                            # Format context from retrieved chunks
+                            context_parts = []
+                            for i, result in enumerate(results, 1):
+                                page = result['meta']['page']
+                                text = result['text']
+                                score = result['score']
+                                context_parts.append(
+                                    f"[Context {i} - Page {page}, Relevance: {score:.2f}]\n{text}\n"
+                                )
+                            
+                            rag_context = "\n".join(context_parts)
+                            print(f"Retrieved {len(results)} relevant chunks from PDF")
+                            
+                        except Exception as e:
+                            print(f"Error retrieving RAG context: {e}")
+                            use_rag = False
+                
+                # Format messages for OpenAI with optional RAG context
+                if use_rag and rag_context:
+                    # Augment user message with RAG context
+                    augmented_message = f"""Based on the following relevant excerpts from the uploaded PDF document, please answer the user's question.
+
+Relevant Document Context:
+{rag_context}
+
+User Question: {user_message}
+
+Please provide a comprehensive answer based on the context above. If the context doesn't contain enough information to fully answer the question, please indicate that."""
+                    messages = format_messages(augmented_message, chat_history)
+                else:
+                    messages = format_messages(user_message, chat_history)
                 
                 # Get streaming response from OpenAI
                 print(f"Processing message: {user_message}")
@@ -171,9 +328,14 @@ async def websocket_chat(websocket: WebSocket):
                 await websocket.send_text("<<<ERROR>>>")
                 
     except WebSocketDisconnect:
-        print("WebSocket disconnected")
+        print(f"WebSocket disconnected for session: {session_id}")
+        # Clean up session on disconnect
+        if session_id:
+            cleanup_session(session_id)
     except Exception as e:
         print(f"WebSocket error: {e}")
+        if session_id:
+            cleanup_session(session_id)
 
 @app.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest):
