@@ -22,7 +22,7 @@ function App() {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [currentCode, setCurrentCode] = useState<string>(''); // Add state for current cell code
   const [initialCodes, setInitialCodes] = useState<Record<string, string>>({});
-  const API_BASE = import.meta.env.VITE_API_BASE || '';
+  const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
   const handleStepClick = (stepId: string) => {
     setCurrentStepId(stepId);
@@ -145,6 +145,7 @@ function App() {
           messages={messages}
           onSendMessage={handleSendMessage}
           currentCode={currentCode} // Pass current code to ChatPanel
+          apiBase={API_BASE}
         />
       </div>
     </div>

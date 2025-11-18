@@ -10,6 +10,18 @@ if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable is required")
 
 
+async def _post_openai(payload: Dict) -> Dict:
+    url = "https://api.openai.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json()
+
+
 async def get_openai_streaming_response(
     messages: List[Dict[str, str]],
     model: str = "gpt-3.5-turbo",
@@ -20,11 +32,6 @@ async def get_openai_streaming_response(
     This avoids relying on the `openai` Python SDK so we don't hit
     compatibility issues with the installed `httpx` version.
     """
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json",
-    }
     payload = {
         "model": model,
         "messages": messages,
@@ -39,8 +46,11 @@ async def get_openai_streaming_response(
         async with httpx.AsyncClient(timeout=60.0) as client:
             async with client.stream(
             "POST",
-            url,
-            headers=headers,
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
             json=payload,
         ) as response:
                 response.raise_for_status()
@@ -77,6 +87,33 @@ async def get_openai_streaming_response(
     except Exception as e:
         print(f"OpenAI API Error: {e}")
         yield f"Error: {str(e)}"
+
+
+async def summarize_plot_with_image(base64_image: str, prompt: str) -> str:
+    """Call GPT-4o to summarize a PNG provided as base64 data."""
+    payload = {
+        "model": "gpt-4o",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{base64_image}"},
+                    },
+                ],
+            }
+        ],
+        "max_tokens": 300,
+    }
+
+    try:
+        data = await _post_openai(payload)
+        return data["choices"][0]["message"]["content"]
+    except Exception as exc:
+        print(f"Image summary failed: {exc}")
+        raise
 
 def format_messages(user_input: str, chat_history: List[Dict] = None) -> List[Dict[str, str]]:
     """

@@ -35,17 +35,27 @@ except ImportError:
     _load_env_fallback()
 
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import json
 import asyncio
 from typing import List, Optional
 import os
-from models.openai_chat import get_openai_streaming_response, format_messages
+from datetime import datetime
+from pathlib import Path
+from models.openai_chat import (
+    get_openai_streaming_response,
+    format_messages,
+    summarize_plot_with_image,
+)
 from kernel_manager import get_kernel_manager
+import base64
 
 app = FastAPI(title="Alzheimer's Analysis Pipeline API")
+BASE_DIR = Path(__file__).resolve().parent.parent
+PLOT_UPLOAD_DIR = BASE_DIR / "uploads" / "plots"
+PLOT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Enable CORS for frontend
 app.add_middleware(
@@ -72,6 +82,46 @@ class ExecuteRequest(BaseModel):
 @app.get("/")
 async def root():
     return {"message": "Alzheimer's Analysis Pipeline API"}
+
+
+@app.post("/api/plots/upload")
+async def upload_plot(file: UploadFile = File(...)):
+    """Upload a PNG plot for backend processing/storage."""
+    if file.content_type not in ("image/png", "application/octet-stream"):
+        raise HTTPException(status_code=400, detail="Only PNG files are supported")
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+    safe_name = file.filename or "plot.png"
+    filename = f"{timestamp}_{safe_name}".replace(" ", "_")
+    file_path = PLOT_UPLOAD_DIR / filename
+
+    try:
+        with open(file_path, "wb") as buffer:
+            buffer.write(contents)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save plot: {exc}")
+
+    base64_image = base64.b64encode(contents).decode("utf-8")
+    summary = None
+    try:
+        summary_prompt = "Summarize the key trends and implications shown in this graph."
+        summary = await summarize_plot_with_image(base64_image, summary_prompt)
+    except Exception as exc:
+        print(f"Plot summary generation failed: {exc}")
+
+    return {
+        "status": "success",
+        "filename": filename,
+        "originalName": file.filename,
+        "size": len(contents),
+        "storedPath": str(file_path),
+        "base64": base64_image,
+        "summary": summary,
+    }
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
