@@ -1,3 +1,40 @@
+# Load environment variables from .env file FIRST, before any imports
+import os
+
+def _load_env_fallback():
+    """Fallback loader for .env that gives a clearer error if encoding is bad."""
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if not os.path.exists(env_path):
+        return
+
+    try:
+        # Try the common UTF‑8 encoding first (with BOM support)
+        with open(env_path, "r", encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    os.environ[key.strip()] = value.strip()
+    except UnicodeDecodeError:
+        # This usually means the file was saved as UTF‑16 or another non‑UTF‑8 encoding.
+        # We surface a clear message instead of a cryptic stack trace.
+        raise RuntimeError(
+            "Failed to read '.env' file due to encoding issues. "
+            "Please re-save the file as UTF-8 (without BOM) and try again."
+        )
+
+try:
+    from dotenv import load_dotenv
+    try:
+        # Explicitly tell python-dotenv to expect UTF‑8, and fall back if that fails.
+        load_dotenv(encoding="utf-8")
+    except UnicodeDecodeError:
+        _load_env_fallback()
+except ImportError:
+    # If python-dotenv is not installed, manually load .env file
+    _load_env_fallback()
+
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
