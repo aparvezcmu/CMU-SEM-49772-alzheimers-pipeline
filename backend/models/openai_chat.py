@@ -22,7 +22,22 @@ def safe_extract_content(chunk) -> Optional[str]:
         print(f"Error extracting content: {e}")
         return None
 
-async def get_openai_streaming_response(messages: List[Dict[str, str]], model: str = "gpt-3.5-turbo"):
+def query_openai_api(instruction: str, inp: str, model: str = "gpt-4o"):
+    """
+    Query OpenAI API
+    """
+    response = openai_client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": instruction},
+            {"role": "user", "content": inp}
+        ],
+        temperature=0.7,
+        max_tokens=2000
+    )
+    return response.choices[0].message.content
+
+async def get_openai_streaming_response(messages: List[Dict[str, str]], model: str = "gpt-4o"):
     """
     Get streaming response from OpenAI API (async version)
     

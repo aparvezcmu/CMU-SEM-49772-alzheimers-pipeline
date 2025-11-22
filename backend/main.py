@@ -30,7 +30,7 @@ import json
 import asyncio
 
 from typing import List, Optional, Dict, Any
-from models.openai_chat import get_openai_streaming_response, format_messages
+from models.openai_chat import get_openai_streaming_response, format_messages, query_openai_api
 from kernel_manager import get_kernel_manager
 from storage.azure_blob_manager import get_blob_manager
 
@@ -81,7 +81,20 @@ app.add_middleware(
 session_storage: Dict[str, Dict[str, Any]] = {}
 
 # Temporary directory for PDF uploads (cleared on restart)
-TEMP_DIR = tempfile.mkdtemp(prefix="alzheimer_pdfs_")
+TEMP_DIR = tempfile.mkdtemp(prefix="gene_ide_pdfs_")
+
+# PDF summary response format
+PDF_SUMMARY_FORMAT = """
+Format the response in the following format:
+- Prevalence of the issue
+- Impact of the paper - Innovation of paper
+- Existing landscape (Current state) in terms of research paper
+- Hypothesis of the paper
+- Datasets(Ex: open, closed, propriety)
+- Methods/Approach - like deep learning, machine learning/statistics
+- Results
+
+"""
 
 def cleanup_session(session_id: str):
     """Clean up session data including PDF file and FAISS index"""
@@ -96,6 +109,16 @@ def cleanup_session(session_id: str):
         # Remove from session storage
         del session_storage[session_id]
         print(f"Cleaned up session: {session_id}")
+
+def is_document_summary_query(query: str) -> bool:
+    """
+    Detect if a query is a document summary query.
+    Returns True if the query is a document summary query.
+    """
+    query_lower = query.lower()
+    instruction = "You are an assistant who is goig to tell me if the query is a document summary query. If it is, return True, otherwise return False."
+    response = query_openai_api(instruction, query_lower)
+    return "true" in response.lower()
 
 def is_document_query(query: str) -> bool:
     """
@@ -149,7 +172,7 @@ class SelectNotebookRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"message": "Alzheimer's Analysis Pipeline API"}
+    return {"message": "Gene Analysis IDE API"}
 
 @app.post("/api/upload_pdf")
 async def upload_pdf(
@@ -301,7 +324,10 @@ Relevant Document Context:
 
 User Question: {user_message}
 
-Please provide a comprehensive answer based on the context above. If the context doesn't contain enough information to fully answer the question, please indicate that."""
+"""
+                    if is_document_summary_query(user_message):
+                        augmented_message += PDF_SUMMARY_FORMAT
+                    augmented_message += """Please provide a comprehensive answer based on the context above. If the context doesn't contain enough information to fully answer the question, please indicate that."""
                     messages = format_messages(augmented_message, chat_history)
                 else:
                     messages = format_messages(user_message, chat_history)
