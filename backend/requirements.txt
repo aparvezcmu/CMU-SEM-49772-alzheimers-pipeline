@@ -19,3 +19,6 @@ matplotlib==3.8.2
 pandas==2.2.0
 numpy==1.26.3
 scanpy==1.9.5
+# Optional: Pillow for image handling and scgpt if available in your environment
+Pillow>=9.0.0
+# scgpt is optional and only used if installed. If you have a specific package name/version, add it here.

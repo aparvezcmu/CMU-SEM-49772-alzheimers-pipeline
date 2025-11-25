@@ -50,6 +50,7 @@ from models.openai_chat import (
 )
 from kernel_manager import get_kernel_manager
 import base64
+from models.scgpt_runner import generate_plot_from_prompt
 
 app = FastAPI(title="Alzheimer's Analysis Pipeline API")
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -138,6 +139,39 @@ async def websocket_chat(websocket: WebSocket):
                 
                 # Format messages for OpenAI
                 messages = format_messages(user_message, chat_history, plot_context)
+
+                # If this message is a plotting request, handle via scgpt_runner
+                is_plot_cmd = False
+                if isinstance(user_message, str) and user_message.strip().lower().startswith("/plot"):
+                    is_plot_cmd = True
+                if plot_context and isinstance(plot_context, dict) and plot_context.get("scgpt"):
+                    is_plot_cmd = True
+
+                if is_plot_cmd:
+                    try:
+                        # Produce a plot image (base64) from prompt
+                        prompt_text = user_message
+                        # If the user used '/plot ' prefix, remove it
+                        if prompt_text.strip().lower().startswith('/plot'):
+                            prompt_text = prompt_text.strip()[5:].strip()
+
+                        plot_result = generate_plot_from_prompt(prompt_text)
+                        if plot_result.get('base64'):
+                            payload = {
+                                'type': 'plot',
+                                'base64': plot_result['base64'],
+                                'meta': plot_result.get('meta', {}),
+                            }
+                            await websocket.send_text(json.dumps(payload))
+                        else:
+                            await websocket.send_text(json.dumps({'type': 'error', 'message': 'Plot generation failed', 'details': plot_result}))
+
+                    except Exception as e:
+                        await websocket.send_text(json.dumps({'type': 'error', 'message': str(e)}))
+
+                    # End this turn
+                    await websocket.send_text("<<<END>>>")
+                    continue
                 
                 # Get streaming response from OpenAI
                 print(f"Processing message: {user_message}")
@@ -183,6 +217,23 @@ async def chat_stream(request: ChatRequest):
         full_response = "".join(response_chunks)
         return {"response": full_response}
         
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class PlotRequest(BaseModel):
+    prompt: str
+
+
+@app.post("/api/plot")
+async def api_plot(req: PlotRequest):
+    """Generate a plot from a natural-language prompt (uses scgpt runner)."""
+    try:
+        result = generate_plot_from_prompt(req.prompt)
+        if result.get('base64'):
+            return {"status": "success", "base64": result['base64'], "meta": result.get('meta', {})}
+        else:
+            return {"status": "error", "error": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
