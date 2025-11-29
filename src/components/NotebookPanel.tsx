@@ -8,6 +8,7 @@ interface NotebookPanelProps {
   stepResult: StepResult | null;
   onStepComplete?: (stepId: string, success: boolean) => void;
   onCodeChange?: (code: string) => void; // Add prop for code change callback
+  onAllCodesChange?: (allCodes: Record<string, string>) => void; // Add prop for all edited codes
   onSendErrorToChat?: (errorMessage: string) => void; // Add prop for sending errors to chat
   initialCodes?: Record<string, string>;
   currentNotebook?: string; // Add prop to track current notebook
@@ -18,6 +19,7 @@ export const NotebookPanel: React.FC<NotebookPanelProps> = ({
   stepResult,
   onStepComplete,
   onCodeChange,
+  onAllCodesChange,
   onSendErrorToChat,
   initialCodes,
   currentNotebook
@@ -62,6 +64,7 @@ export const NotebookPanel: React.FC<NotebookPanelProps> = ({
           currentStep={currentStep}
           onStepComplete={onStepComplete}
           onCodeChange={onCodeChange} // Pass the code change handler
+          onAllCodesChange={onAllCodesChange} // Pass all codes change handler
           onSendErrorToChat={onSendErrorToChat} // Pass the error sender handler
           initialCodes={initialCodes}
           currentNotebook={currentNotebook} // Pass current notebook for state clearing

@@ -7,7 +7,10 @@ import { MarkdownMessage } from './MarkdownMessage';
 interface ChatPanelProps {
   messages: ChatMessage[];
   onSendMessage: (content: string, role?: 'user' | 'assistant') => void;
-  currentCode?: string; // Add prop to receive current cell code
+  currentCode?: string; // Current cell code (legacy, may be removed)
+  currentCellId?: string; // Current active cell ID
+  allEditedCodes?: Record<string, string>; // All edited codes from UI
+  initialCodes?: Record<string, string>; // Initial codes from file
 }
 
 interface PdfInfo {
@@ -16,7 +19,7 @@ interface PdfInfo {
   numChunks: number;
 }
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, currentCode }) => {
+export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, currentCode, currentCellId, allEditedCodes, initialCodes }) => {
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -83,12 +86,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
   const sendMessageToAI = (messageText: string, isFromInput: boolean = true) => {
     if (!wsRef.current?.isConnected || isTyping) return;
 
-    // Create message content that includes current code if available
-    let messageContent = messageText;
-    if (currentCode && currentCode.trim()) {
-      messageContent = `User Message: ${messageText}\n\nCurrent Cell Code:\n\`\`\`python\n${currentCode}\n\`\`\``;
-    }
-    
     // Add user message immediately only if it's from input (not from error button)
     if (isFromInput) {
       onSendMessage(messageText);
@@ -104,9 +101,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
       content: msg.content
     }));
 
-    // Send message via WebSocket with enhanced content
+    // Merge initial codes with edited codes (edited codes override initial)
+    const mergedCodes = { ...initialCodes, ...allEditedCodes };
+    
+    // Send message via WebSocket with cell context and code
     let accumulatedMessage = '';
-    wsRef.current.sendMessage(messageContent, history, {
+    wsRef.current.sendMessage(messageText, history, currentCellId, mergedCodes, {
       onProgress: (chunk: string) => {
         accumulatedMessage += chunk;
         setCurrentMessage(accumulatedMessage);
@@ -254,7 +254,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, c
                 ) : (
                   <>
                     <Upload className="w-4 h-4" />
-                    <span>Upload PDF for Context</span>
+                    <span>Upload Research Paper (PDF)</span>
                   </>
                 )}
               </button>

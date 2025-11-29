@@ -30,6 +30,7 @@ function App() {
   const [currentStepId, setCurrentStepId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [currentCode, setCurrentCode] = useState<string>(''); // Add state for current cell code
+  const [allEditedCodes, setAllEditedCodes] = useState<Record<string, string>>({}); // All edited codes
   const [initialCodes, setInitialCodes] = useState<Record<string, string>>({});
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
   const [currentNotebook, setCurrentNotebook] = useState<string>('colab.ipynb');
@@ -70,6 +71,11 @@ function App() {
   // Function to update current code from NotebookView
   const handleCodeChange = (code: string) => {
     setCurrentCode(code);
+  };
+
+  // Function to update all edited codes from NotebookView
+  const handleAllCodesChange = (allCodes: Record<string, string>) => {
+    setAllEditedCodes(allCodes);
   };
 
   // Function to send error message to chat
@@ -242,6 +248,7 @@ function App() {
           stepResult={null}
           onStepComplete={handleStepComplete}
           onCodeChange={handleCodeChange} // Pass the code change handler
+          onAllCodesChange={handleAllCodesChange} // Pass all codes change handler
           onSendErrorToChat={handleSendErrorToChat} // Pass the error sender handler
           initialCodes={initialCodes}
           currentNotebook={currentNotebook} // Pass current notebook for state clearing
@@ -253,7 +260,10 @@ function App() {
         <ChatPanel
           messages={messages}
           onSendMessage={handleSendMessage}
-          currentCode={currentCode} // Pass current code to ChatPanel
+          currentCode={currentCode} // Pass current code to ChatPanel (legacy)
+          currentCellId={currentStepId || undefined} // Pass current cell ID
+          allEditedCodes={allEditedCodes} // Pass all edited codes
+          initialCodes={initialCodes} // Pass initial codes from file
         />
       </div>
     </div>

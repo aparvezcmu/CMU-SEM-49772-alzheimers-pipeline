@@ -100,6 +100,8 @@ export class ChatWebSocket {
   sendMessage(
     message: string, 
     history: ChatMessage[] = [],
+    cellId?: string,
+    allCodes?: Record<string, string>,
     callbacks: Omit<ChatWebSocketCallbacks, 'onConnect' | 'onDisconnect'> = {}
   ): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -112,7 +114,9 @@ export class ChatWebSocket {
 
     const payload = {
       message,
-      history
+      history,
+      cell_id: cellId || null,
+      all_codes: allCodes || null
     };
 
     try {
