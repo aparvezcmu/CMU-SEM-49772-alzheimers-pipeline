@@ -223,6 +223,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     setUploadError(null);
   };
 
+  const handleRemovePNG = () => {
+    setUploadedPlot(null);
+    setUploadPNGError(null);
+    setUploadedFileName(null);
+  };
+
   const handleUploadButtonClick = () => {
     if (!isUploadingPlot) {
       fileInputRefPNG.current?.click();
@@ -294,30 +300,57 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             <div>
               <h2 className="text-lg font-semibold text-gray-800">AI Assistant</h2>
               <p className="text-sm text-gray-600">OpenAI Streaming Chat</p>
-              <div className="mt-2">
-                <input
-                  ref={fileInputRefPNG}
-                  id="plot-upload-input"
-                  type="file"
-                  accept="image/png"
-                  className="hidden"
-                  onChange={handleFileChange}
-                />
-                <button
-                  type="button"
-                  onClick={handleUploadButtonClick}
-                  disabled={isUploadingPlot}
-                  className='flex items-center space-x-2 px-3 py-2 text-sm bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-                >
-                  <Upload className="w-4 h-4 mr-2" />
-                  Upload plot as PNG
-                </button>
+              <div className="mt-9">
+                {!uploadedFileName &&
+                  <div>
+                    <input
+                    ref={fileInputRefPNG}
+                    id="plot-upload-input"
+                    type="file"
+                    accept="image/png"
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleUploadButtonClick}
+                    disabled={isUploadingPlot}
+                    className='flex items-center space-x-2 px-3 py-2 text-sm bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                  >
+                  {isUploadingPlot ? (
+                    <>
+                      <Loader className="w-4 h-4 animate-spin" />
+                      <span>Uploading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      <span>Upload plot as PNG</span>
+                    </>
+                  )}
+                  </button>
+                </div>
+                }
+
+                {/* Uploaded PNG Info */}
                 {uploadedFileName && (
-                  <p className="text-xs text-gray-600 mt-1">
-                    Uploaded: {uploadedFileName}
-                  </p>
+                  <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="flex items-center space-x-2">
+                      <FileText className="w-4 h-4 text-green-600" />
+                      <div>
+                        <p className="text-sm font-medium text-green-900">{uploadedFileName}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleRemovePNG}
+                      className="p-1 hover:bg-green-100 rounded transition-colors"
+                      title="Remove PNG"
+                    >
+                      <X className="w-4 h-4 text-green-700" />
+                    </button>
+                  </div>
                 )}
-                {uploadError && (
+                {uploadPNGError && (
                   <p className="text-xs text-red-500 mt-1">
                     {uploadPNGError}
                   </p>
@@ -339,7 +372,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
         {/* PDF Upload Section */}
         <div className="mt-4 space-y-2 ml-8">
-          {/* Upload Button */}
+          {/* Upload PDF Button */}
           {!uploadedPdf && (
             <div>
               <input
